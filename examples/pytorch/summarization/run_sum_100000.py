@@ -7,7 +7,7 @@ from datasets import load_dataset, concatenate_datasets
 
 from transformers import (
     BartConfig,
-    BartForConditionalGeneration,
+    # BartForConditionalGeneration,
     AutoTokenizer,
     set_seed,
     DataCollatorForSeq2Seq,
@@ -23,7 +23,7 @@ from transformers import (
 # torch.cuda.manual_seed_all(seed)
 
 # 加载数据集
-# from transformers.models.bart.modeling_bart_original import BartForConditionalGeneration
+from transformers.models.bart.modeling_bart_seqLoss import BartForConditionalGeneration
 
 train_dataset = load_dataset('json', data_files='./data/train_subsets.json')
 test_dataset = load_dataset('json', data_files='./data/test_public.json')
@@ -35,6 +35,7 @@ model_name = "IDEA-CCNL/Randeng-BART-139M"
 # model_name = "./output/original_results/checkpoint-15500"
 # model_name = "./output/AddSentenceLoss/checkpoint-15500"
 # model_name = "./output/reversal-reversal/checkpoint-15500"
+# model_name = "./output/label_train_text/checkpoint-15500"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = BartForConditionalGeneration.from_pretrained(model_name)
@@ -54,10 +55,10 @@ model.resize_token_embeddings(len(tokenizer))
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="./output/label_train_text",
+    output_dir="output/lcstsm/sentenceLoss2",
     num_train_epochs=20,
     do_train=True,
-    # do_eval=True,
+    do_eval=True,
     per_device_train_batch_size=batch_size,
     per_device_eval_batch_size=batch_size,
     learning_rate=1e-4,
@@ -75,12 +76,12 @@ args = Seq2SeqTrainingArguments(
 )
 
 def preprocess_function001(examples):
-    inputs = [prefix1 + doc for doc in examples["summary"]]
+    inputs = [prefix1 + doc for doc in examples["text"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, truncation=True)
 
     # Setup the tokenizer for targets
     with tokenizer.as_target_tokenizer():
-        labels = tokenizer(examples["text"], max_length=max_target_length, truncation=True)
+        labels = tokenizer(examples["summary"], max_length=max_target_length, truncation=True)
 
     model_inputs["labels"] = labels["input_ids"]
     return model_inputs

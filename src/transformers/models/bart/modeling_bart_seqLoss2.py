@@ -1593,7 +1593,6 @@ class BartForConditionalGeneration(BartPreTrainedModel):
         )
 
         lm_logits = self.lm_head(outputs[0])
-
         #####################chz
         gen_input_ids = torch.argmax(lm_logits, dim=2)
         shared_decoder_outputs = self.model.shared(gen_input_ids)
