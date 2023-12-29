@@ -23,7 +23,7 @@ from transformers import (
 # torch.cuda.manual_seed_all(seed)
 
 # 加载数据集
-from transformers.models.bart.modeling_bart_seqLoss import BartForConditionalGeneration
+from transformers.models.bart.modeling_bart_seqLoss_highDim import BartForConditionalGeneration
 
 train_dataset = load_dataset('json', data_files='./data/train_subsets.json')
 test_dataset = load_dataset('json', data_files='./data/test_public.json')
@@ -55,7 +55,7 @@ model.resize_token_embeddings(len(tokenizer))
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/sentenceLoss2",
+    output_dir="output/lcstsm/sentenceLoss_highDim2",
     num_train_epochs=20,
     do_train=True,
     do_eval=True,
