@@ -1593,27 +1593,25 @@ class BartForConditionalGeneration(BartPreTrainedModel):
         )
 
         lm_logits = self.lm_head(outputs[0])
-
-        #####################chz
-        gen_input_ids = torch.argmax(lm_logits, dim=2)
-        shared_decoder_outputs = self.model.shared(gen_input_ids)
-        shared_decoder_inputs = self.model.shared(decoder_input_ids)
-
-        average_decoder_output = torch.mean(shared_decoder_outputs, dim=1, keepdim=True)
-        average_decoder_input = torch.mean(shared_decoder_inputs, dim=1, keepdim=True)
-        similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
-
-        half_index = decoder_input_ids.shape[1] // 2
-        left_average_decoder_output = torch.mean(shared_decoder_outputs[:, :half_index, :], dim=1, keepdim=True)
-        right_average_decoder_output = torch.mean(shared_decoder_outputs[:, half_index:, :], dim=1, keepdim=True)
-
-        left_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
-        right_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
-
-        similarity11 = torch.nn.functional.cosine_similarity(left_average_decoder_output, left_average_decoder_input, dim=-1)
-        similarity12 = torch.nn.functional.cosine_similarity(right_average_decoder_output, right_average_decoder_input, dim=-1)
-        #####################
         lm_logits = lm_logits + self.final_logits_bias.to(lm_logits.device)
+        ########### 生成token ##########chz
+        # next_token_logits = lm_logits[:, -1, :]
+        # from transformers.generation.logits_process import LogitsProcessorList
+        # logits_processor = LogitsProcessorList()
+        # next_tokens_scores = logits_processor(input_ids, next_token_logits)
+        # next_tokens = torch.argmax(next_tokens_scores, dim=-1)
+        #
+        # gen_input_ids = torch.argmax(lm_logits, dim=2)
+        #
+        # gen_idx = gen_input_ids.cpu().numpy()
+        # from transformers import AutoTokenizer
+        # model_name = "IDEA-CCNL/Randeng-BART-139M"
+        # tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # gen_tokens = tokenizer.batch_decode(gen_idx)
+        #
+        # decoder_idx = decoder_input_ids.cpu().numpy()
+        # decoder_tokens = tokenizer.batch_decode(decoder_idx)
+        ####################################
 
         masked_lm_loss = None
         if labels is not None:
@@ -1621,11 +1619,31 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
             ##################chz
+            gen_input_ids = torch.argmax(lm_logits, dim=2)
+
+            gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
+            gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
+
+            label_sequence_lengths = torch.ne(labels, -100).sum(-1)
+            label_sequence_matrix = torch.ne(labels, -100).int().float()
+
+            shared_decoder_outputs = self.model.shared(gen_input_ids)
+            shared_decoder_inputs = self.model.shared(decoder_input_ids)
+
+            res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))
+            sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)
+            average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1)
+
+            res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
+            sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
+            average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
+
+            similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
             similarity_target = torch.ones_like(similarity)
             similarity_loss = torch.nn.functional.mse_loss(similarity, similarity_target)
-            similarity_loss11 = torch.nn.functional.mse_loss(similarity11, similarity_target)
-            similarity_loss12 = torch.nn.functional.mse_loss(similarity12, similarity_target)
-            masked_lm_loss = masked_lm_loss + similarity_loss + similarity_loss11 + similarity_loss12
+            #####################
+
+            masked_lm_loss = masked_lm_loss + similarity_loss
 
         if not return_dict:
             output = (lm_logits,) + outputs[1:]
