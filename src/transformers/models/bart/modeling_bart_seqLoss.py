@@ -1595,14 +1595,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
         lm_logits = self.lm_head(outputs[0])
         lm_logits = lm_logits + self.final_logits_bias.to(lm_logits.device)
         ########### 生成token ##########chz
-        # next_token_logits = lm_logits[:, -1, :]
-        # from transformers.generation.logits_process import LogitsProcessorList
-        # logits_processor = LogitsProcessorList()
-        # next_tokens_scores = logits_processor(input_ids, next_token_logits)
-        # next_tokens = torch.argmax(next_tokens_scores, dim=-1)
-        #
         # gen_input_ids = torch.argmax(lm_logits, dim=2)
-        #
         # gen_idx = gen_input_ids.cpu().numpy()
         # from transformers import AutoTokenizer
         # model_name = "IDEA-CCNL/Randeng-BART-139M"
@@ -1624,8 +1617,8 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
             gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
 
-            label_sequence_lengths = torch.ne(labels, -100).sum(-1)
-            label_sequence_matrix = torch.ne(labels, -100).int().float()
+            label_sequence_lengths = torch.ne(decoder_input_ids, self.config.pad_token_id).sum(-1)
+            label_sequence_matrix = torch.ne(decoder_input_ids, self.config.pad_token_id).int().float()
 
             shared_decoder_outputs = self.model.shared(gen_input_ids)
             shared_decoder_inputs = self.model.shared(decoder_input_ids)
@@ -1637,6 +1630,19 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
             sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
             average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
+
+            # lm_logits2 = self.lm_head(average_decoder_output)
+            # aver_token = torch.argmax(lm_logits2, dim=2)
+            # aver_idx = aver_token.cpu().numpy()
+            # from transformers import AutoTokenizer
+            # model_name = "IDEA-CCNL/Randeng-BART-139M"
+            # tokenizer = AutoTokenizer.from_pretrained(model_name)
+            # gen_tokens = tokenizer.batch_decode(aver_idx)
+            #
+            # lm_logits3 = self.lm_head(average_decoder_input)
+            # aver_input = torch.argmax(lm_logits3, dim=2)
+            # aver_input_dx = aver_input.cpu().numpy()
+            # input_tokens = tokenizer.batch_decode(aver_input_dx)
 
             similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
             similarity_target = torch.ones_like(similarity)

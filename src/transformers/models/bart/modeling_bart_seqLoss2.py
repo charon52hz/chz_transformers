@@ -1591,27 +1591,13 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+        #### GPT2
+        # if input_ids is not None:
+        #     sequence_lengths = (torch.eq(input_ids, self.config.pad_token_id).int().argmax(-1) - 1).to(
+        #         logits.device
+        #     )
 
         lm_logits = self.lm_head(outputs[0])
-        #####################chz
-        gen_input_ids = torch.argmax(lm_logits, dim=2)
-        shared_decoder_outputs = self.model.shared(gen_input_ids)
-        shared_decoder_inputs = self.model.shared(decoder_input_ids)
-
-        average_decoder_output = torch.mean(shared_decoder_outputs, dim=1, keepdim=True)
-        average_decoder_input = torch.mean(shared_decoder_inputs, dim=1, keepdim=True)
-        similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
-
-        half_index = decoder_input_ids.shape[1] // 2
-        left_average_decoder_output = torch.mean(shared_decoder_outputs[:, :half_index, :], dim=1, keepdim=True)
-        right_average_decoder_output = torch.mean(shared_decoder_outputs[:, half_index:, :], dim=1, keepdim=True)
-
-        left_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
-        right_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
-
-        similarity11 = torch.nn.functional.cosine_similarity(left_average_decoder_output, left_average_decoder_input, dim=-1)
-        similarity12 = torch.nn.functional.cosine_similarity(right_average_decoder_output, right_average_decoder_input, dim=-1)
-        #####################
         lm_logits = lm_logits + self.final_logits_bias.to(lm_logits.device)
 
         masked_lm_loss = None
@@ -1620,6 +1606,38 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
             ##################chz
+            gen_input_ids = torch.argmax(lm_logits, dim=2)
+
+            gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
+            gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
+
+            label_sequence_lengths = torch.ne(labels, -100).sum(-1)
+            label_sequence_matrix = torch.ne(labels, -100).int().float()
+
+            shared_decoder_outputs = self.model.shared(gen_input_ids)
+            shared_decoder_inputs = self.model.shared(decoder_input_ids)
+
+            res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))
+            sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)
+            average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1)
+
+            res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
+            sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
+            average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
+
+            similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
+
+            half_index = label_sequence_lengths / 2
+            left_average_decoder_output = torch.mean(shared_decoder_outputs[:, :half_index, :], dim=1, keepdim=True)
+            right_average_decoder_output = torch.mean(shared_decoder_outputs[:, half_index:, :], dim=1, keepdim=True)
+
+            left_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
+            right_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
+
+            similarity11 = torch.nn.functional.cosine_similarity(left_average_decoder_output, left_average_decoder_input, dim=-1)
+            similarity12 = torch.nn.functional.cosine_similarity(right_average_decoder_output, right_average_decoder_input, dim=-1)
+            #####################
+
             similarity_target = torch.ones_like(similarity)
             similarity_loss = torch.nn.functional.mse_loss(similarity, similarity_target)
             similarity_loss11 = torch.nn.functional.mse_loss(similarity11, similarity_target)

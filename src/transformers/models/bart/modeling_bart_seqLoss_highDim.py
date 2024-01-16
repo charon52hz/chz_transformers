@@ -1593,40 +1593,6 @@ class BartForConditionalGeneration(BartPreTrainedModel):
         )
 
         lm_logits = self.lm_head(outputs[0])
-        #####################chz
-        gen_input_ids = torch.argmax(lm_logits, dim=2)
-        shared_decoder_outputs = self.model.shared(gen_input_ids)
-        shared_decoder_inputs = self.model.shared(decoder_input_ids)
-
-        max_emb_outputs, _ = torch.max(shared_decoder_outputs, dim=1)
-        max_emb_inputs, _ = torch.max(shared_decoder_inputs, dim=1)
-
-        min_emb_outputs, _ = torch.min(shared_decoder_outputs, dim=1)
-        min_emb_inputs, _ = torch.min(shared_decoder_inputs, dim=1)
-
-        max_emb_outputs = max_emb_outputs.unsqueeze(1)
-        max_emb_inputs = max_emb_inputs.unsqueeze(1)
-        min_emb_outputs = min_emb_outputs.unsqueeze(1)
-        min_emb_inputs = min_emb_inputs.unsqueeze(1)
-
-        max_emb_similarity = torch.nn.functional.cosine_similarity(max_emb_outputs, max_emb_inputs, dim=-1)
-        min_emb_similarity = torch.nn.functional.cosine_similarity(min_emb_outputs, min_emb_inputs, dim=-1)
-
-
-        average_decoder_output = torch.mean(shared_decoder_outputs, dim=1, keepdim=True)
-        average_decoder_input = torch.mean(shared_decoder_inputs, dim=1, keepdim=True)
-        similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
-
-        half_index = decoder_input_ids.shape[1] // 2
-        left_average_decoder_output = torch.mean(shared_decoder_outputs[:, :half_index, :], dim=1, keepdim=True)
-        right_average_decoder_output = torch.mean(shared_decoder_outputs[:, half_index:, :], dim=1, keepdim=True)
-
-        left_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
-        right_average_decoder_input = torch.mean(shared_decoder_inputs[:, half_index:, :], dim=1, keepdim=True)
-
-        similarity11 = torch.nn.functional.cosine_similarity(left_average_decoder_output, left_average_decoder_input, dim=-1)
-        similarity12 = torch.nn.functional.cosine_similarity(right_average_decoder_output, right_average_decoder_input, dim=-1)
-        #####################
         lm_logits = lm_logits + self.final_logits_bias.to(lm_logits.device)
 
         masked_lm_loss = None
@@ -1635,14 +1601,45 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
             ##################chz
+            gen_input_ids = torch.argmax(lm_logits, dim=2)
+            gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
+            gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
+
+            label_sequence_lengths = torch.ne(decoder_input_ids, self.config.pad_token_id).sum(-1)
+            label_sequence_matrix = torch.ne(decoder_input_ids, self.config.pad_token_id).int().float()
+
+            shared_decoder_outputs = self.model.shared(gen_input_ids)
+            shared_decoder_inputs = self.model.shared(decoder_input_ids)
+
+            res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))
+            sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)
+            average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1)
+
+            res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
+            sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
+            average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
+
+            max_emb_outputs, _ = torch.max(res1, dim=1)
+            max_emb_inputs, _ = torch.max(res2, dim=1)
+
+            min_emb_outputs, _ = torch.min(res1, dim=1)
+            min_emb_inputs, _ = torch.min(res2, dim=1)
+
+            max_emb_outputs = max_emb_outputs.unsqueeze(1)
+            max_emb_inputs = max_emb_inputs.unsqueeze(1)
+            min_emb_outputs = min_emb_outputs.unsqueeze(1)
+            min_emb_inputs = min_emb_inputs.unsqueeze(1)
+
+            max_emb_similarity = torch.nn.functional.cosine_similarity(max_emb_outputs, max_emb_inputs, dim=-1)
+            min_emb_similarity = torch.nn.functional.cosine_similarity(min_emb_outputs, min_emb_inputs, dim=-1)
+
+            similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
             similarity_target = torch.ones_like(similarity)
             similarity_loss = torch.nn.functional.mse_loss(similarity, similarity_target)
-            similarity_loss11 = torch.nn.functional.mse_loss(similarity11, similarity_target)
-            similarity_loss12 = torch.nn.functional.mse_loss(similarity12, similarity_target)
             max_emb_similarity_loss = torch.nn.functional.mse_loss(max_emb_similarity, similarity_target)
             min_emb_similarity_loss = torch.nn.functional.mse_loss(min_emb_similarity, similarity_target)
 
-            masked_lm_loss = masked_lm_loss + similarity_loss + similarity_loss11 + similarity_loss12 + 20 * (max_emb_similarity_loss + min_emb_similarity_loss)
+            masked_lm_loss = masked_lm_loss + similarity_loss + 20 * (max_emb_similarity_loss + min_emb_similarity_loss)
         if not return_dict:
             output = (lm_logits,) + outputs[1:]
             return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output

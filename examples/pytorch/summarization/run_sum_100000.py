@@ -29,14 +29,14 @@ train_dataset = load_dataset('json', data_files='./data/train_subsets.json')
 test_dataset = load_dataset('json', data_files='./data/test_public.json')
 valid_dataset = load_dataset('json', data_files='./data/valid.json')
 
-# model_name = "IDEA-CCNL/Randeng-BART-139M"
+model_name = "IDEA-CCNL/Randeng-BART-139M"
 # model_name = "IDEA-CCNL/Randeng-BART-139M-SUMMARY"
 # model_name = "beyond/genius-base-chinese"
 # model_name = "./output/original_results/checkpoint-15500"
 # model_name = "./output/AddSentenceLoss/checkpoint-15500"
 # model_name = "./output/reversal-reversal/checkpoint-15500"
 # model_name = "./output/label_train_text/checkpoint-15500"
-model_name = "./output/lcstsm/version2/sentenceLoss1-1/checkpoint-15500"
+# model_name = "./output/lcstsm/version2/sentenceLoss1-1/checkpoint-15500"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = BartForConditionalGeneration.from_pretrained(model_name)
@@ -56,7 +56,7 @@ model.resize_token_embeddings(len(tokenizer))
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/version2/sentenceLoss1-1",
+    output_dir="output/lcstsm/version2/sentenceLoss",
     num_train_epochs=20,
     do_train=True,
     do_eval=True,
@@ -140,19 +140,19 @@ def main():
     )
 
     # 评估时：
-    eval_result = trainer.evaluate()
-    print(eval_result)
+    # eval_result = trainer.evaluate()
+    # print(eval_result)
 
     # 训练时：
     # train_result = trainer.train(resume_from_checkpoint=True)
-    # train_result = trainer.train()
-    # print(train_result)
-    #
-    # trainer.save_model()
-    # metrics = train_result.metrics
-    # trainer.log_metrics("train", metrics)
-    # trainer.save_metrics("train", metrics)
-    # trainer.save_state()
+    train_result = trainer.train()
+    print(train_result)
+
+    trainer.save_model()
+    metrics = train_result.metrics
+    trainer.log_metrics("train", metrics)
+    trainer.save_metrics("train", metrics)
+    trainer.save_state()
 
 # 这里用的是中文lawrouge 至于字符级还是词级计算看自己调整 这里是字符级
 def compute_metrics(eval_pred):
