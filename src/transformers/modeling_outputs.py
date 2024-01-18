@@ -786,6 +786,7 @@ class Seq2SeqLMOutput(ModelOutput):
     encoder_last_hidden_state: Optional[torch.FloatTensor] = None
     encoder_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     encoder_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    average_decoder_input: Optional[Tuple[torch.FloatTensor]] = None
 
 
 @dataclass

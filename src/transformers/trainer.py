@@ -1808,6 +1808,7 @@ class Trainer:
                 rng_to_sync = True
 
             step = -1
+            labels_average_list = []
             for step, inputs in enumerate(epoch_iterator):
                 total_batched_samples += 1
 
@@ -1841,7 +1842,8 @@ class Trainer:
                     self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
 
                 with self.accelerator.accumulate(model):
-                    tr_loss_step = self.training_step(model, inputs)
+                    tr_loss_step, labels_average = self.training_step(model, inputs)
+                    labels_average_list.append(labels_average)
 
                 if (
                     args.logging_nan_inf_filter
@@ -1914,7 +1916,8 @@ class Trainer:
                     f" num_steps ({max_steps}) higher than the number of available samples."
                 )
                 self.control.should_training_stop = True
-
+            average_labels = torch.cat(labels_average_list, dim=0)
+            torch.save(average_labels, 'average_labels.pth')
             self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
             self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
 
@@ -2698,7 +2701,7 @@ class Trainer:
             return loss_mb.reduce_mean().detach().to(self.args.device)
 
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss, labels_average = self.compute_loss(model, inputs)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -2709,7 +2712,7 @@ class Trainer:
         else:
             self.accelerator.backward(loss)
 
-        return loss.detach() / self.args.gradient_accumulation_steps
+        return loss.detach() / self.args.gradient_accumulation_steps, labels_average
 
     def compute_loss(self, model, inputs, return_outputs=False):
         """
@@ -2746,7 +2749,7 @@ class Trainer:
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
-        return (loss, outputs) if return_outputs else loss
+        return (loss, outputs) if return_outputs else loss, outputs["average_decoder_input"]
 
     def is_local_process_zero(self) -> bool:
         """

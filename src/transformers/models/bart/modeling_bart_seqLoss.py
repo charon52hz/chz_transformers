@@ -1563,6 +1563,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
 
         Returns:
         """
+        global average_decoder_input
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if labels is not None:
@@ -1592,7 +1593,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             return_dict=return_dict,
         )
 
-        lm_logits = self.lm_head(outputs[0])
+        lm_logits = self.lm_head(outputs[0])        # 21*768 -> 21*40004
         lm_logits = lm_logits + self.final_logits_bias.to(lm_logits.device)
         ########### 生成token ##########chz
         # gen_input_ids = torch.argmax(lm_logits, dim=2)
@@ -1612,16 +1613,18 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
             ##################chz
-            gen_input_ids = torch.argmax(lm_logits, dim=2)
+            labels_copy = labels.clone()
+            labels_copy.masked_fill_(labels == -100, self.config.pad_token_id)
+            gen_input_ids = torch.argmax(lm_logits, dim=2)  # 21*40004 -> 21
 
             gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
             gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
 
-            label_sequence_lengths = torch.ne(decoder_input_ids, self.config.pad_token_id).sum(-1)
-            label_sequence_matrix = torch.ne(decoder_input_ids, self.config.pad_token_id).int().float()
+            label_sequence_lengths = torch.ne(labels_copy, self.config.pad_token_id).sum(-1)
+            label_sequence_matrix = torch.ne(labels_copy, self.config.pad_token_id).int().float()
 
             shared_decoder_outputs = self.model.shared(gen_input_ids)
-            shared_decoder_inputs = self.model.shared(decoder_input_ids)
+            shared_decoder_inputs = self.model.shared(labels_copy)
 
             res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))
             sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)
@@ -1665,6 +1668,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             encoder_last_hidden_state=outputs.encoder_last_hidden_state,
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
+            average_decoder_input=average_decoder_input,
         )
 
     def prepare_inputs_for_generation(
