@@ -951,6 +951,8 @@ class BartEncoder(BartPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+        self.labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
+
     def get_input_embeddings(self):
         return self.embed_tokens
 
@@ -1023,6 +1025,22 @@ class BartEncoder(BartPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
+        input_mean = torch.mean(inputs_embeds, dim=1)
+        label_mean = self.labels_means.to("cuda")
+
+        def find_most_similar_vectors(batch_vectors, target_vectors):
+            from torch.nn.functional import cosine_similarity
+            # 计算批次向量与目标向量的余弦相似度
+            similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
+            # 找到每个批次向量最相似的目标向量索引
+            most_similar_indices = torch.argmax(similarities, dim=1)
+            # 根据索引获取最相似的目标向量
+            most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
+            return most_similar_vectors
+
+        most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
+        # inputs_embeds = torch.cat((most_similar_vectors.unsqueeze(1), inputs_embeds), dim=1)
+
         embed_pos = self.embed_positions(input)
         embed_pos = embed_pos.to(inputs_embeds.device)
 
@@ -1032,6 +1050,7 @@ class BartEncoder(BartPreTrainedModel):
 
         # expand attention_mask
         if attention_mask is not None:
+            # attention_mask = torch.cat((torch.ones(128, 1, dtype=torch.int).to("cuda"), attention_mask), dim=1)
             if getattr(self.config, "_flash_attn_2_enabled", False):
                 attention_mask = attention_mask if 0 in attention_mask else None
             else:
@@ -1089,7 +1108,8 @@ class BartEncoder(BartPreTrainedModel):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions,
+            another_vectors=most_similar_vectors
         )
 
 
@@ -1459,6 +1479,7 @@ class BartModel(BartPreTrainedModel):
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
 
+
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
@@ -1564,6 +1585,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
         Returns:
         """
         global average_decoder_input
+
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if labels is not None:
@@ -1623,12 +1645,12 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             label_sequence_lengths = torch.ne(labels_copy, self.config.pad_token_id).sum(-1)
             label_sequence_matrix = torch.ne(labels_copy, self.config.pad_token_id).int().float()
 
-            shared_decoder_outputs = self.model.shared(gen_input_ids)
-            shared_decoder_inputs = self.model.shared(labels_copy)
+            shared_decoder_outputs = self.model.encoder(gen_input_ids)["last_hidden_state"] # 生成的token的embedding
+            shared_decoder_inputs = self.model.encoder(labels_copy)["last_hidden_state"]    # 标签的token的embedding
 
-            res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))
-            sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)
-            average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1)
+            res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))    # 去除0值的embedding
+            sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)   # 求和
+            average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1) # 算平均
 
             res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
             sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)

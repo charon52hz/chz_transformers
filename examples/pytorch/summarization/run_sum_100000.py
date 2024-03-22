@@ -53,7 +53,7 @@ model.resize_token_embeddings(len(tokenizer))
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/version3/sentenceLoss",
+    output_dir="output/lcstsm/version4/sentenceLoss",
     num_train_epochs=20,
     do_train=True,
     do_eval=True,
