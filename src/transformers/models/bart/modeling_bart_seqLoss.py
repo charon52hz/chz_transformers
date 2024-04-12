@@ -129,6 +129,29 @@ class BartLearnedPositionalEmbedding(nn.Embedding):
         return super().forward(positions + self.offset)
 
 
+class CHZPositionalEmbedding(nn.Embedding):
+    """
+    This module learns positional embeddings up to a fixed maximum size.
+    """
+
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        # Bart is set up so that if padding_idx is specified then offset the embedding ids by 2
+        # and adjust num_embeddings appropriately. Other models don't have this hack
+        self.offset = 2
+        super().__init__(num_embeddings + self.offset, embedding_dim)
+
+    def forward(self, input_ids: torch.Tensor, past_key_values_length: int = 0):
+        """`input_ids' shape is expected to be [bsz x seqlen]."""
+
+        bsz, seq_len = input_ids.shape[:2]
+        seq_len = seq_len + 1
+        positions = torch.arange(
+            past_key_values_length, past_key_values_length + seq_len, dtype=torch.long, device=self.weight.device
+        ).expand(bsz, -1)
+
+        return super().forward(positions + self.offset)
+
+
 class BartAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -951,7 +974,7 @@ class BartEncoder(BartPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-        self.labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
+        # self.labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1025,20 +1048,20 @@ class BartEncoder(BartPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
-        input_mean = torch.mean(inputs_embeds, dim=1)
-        label_mean = self.labels_means.to("cuda")
-
-        def find_most_similar_vectors(batch_vectors, target_vectors):
-            from torch.nn.functional import cosine_similarity
-            # 计算批次向量与目标向量的余弦相似度
-            similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
-            # 找到每个批次向量最相似的目标向量索引
-            most_similar_indices = torch.argmax(similarities, dim=1)
-            # 根据索引获取最相似的目标向量
-            most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
-            return most_similar_vectors
-
-        most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
+        # input_mean = torch.mean(inputs_embeds, dim=1)
+        # label_mean = self.labels_means.to("cuda")
+        #
+        # def find_most_similar_vectors(batch_vectors, target_vectors):
+        #     from torch.nn.functional import cosine_similarity
+        #     # 计算批次向量与目标向量的余弦相似度
+        #     similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
+        #     # 找到每个批次向量最相似的目标向量索引
+        #     most_similar_indices = torch.argmax(similarities, dim=1)
+        #     # 根据索引获取最相似的目标向量
+        #     most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
+        #     return most_similar_vectors
+        #
+        # most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
         # inputs_embeds = torch.cat((most_similar_vectors.unsqueeze(1), inputs_embeds), dim=1)
 
         embed_pos = self.embed_positions(input)
@@ -1109,7 +1132,7 @@ class BartEncoder(BartPreTrainedModel):
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
             last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions,
-            another_vectors=most_similar_vectors
+            # another_vectors=most_similar_vectors  ############chz
         )
 
 
@@ -1145,6 +1168,10 @@ class BartDecoder(BartPreTrainedModel):
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         self.post_init()
+
+    def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):     ############ chz
+        return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1252,18 +1279,40 @@ class BartDecoder(BartPreTrainedModel):
         else:
             raise ValueError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
 
+        #########chz
+        # dummy_token = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\dummy_token.pt")
+        # dummy_token = dummy_token.to("cuda")
+        # dummy_token = dummy_token.unsqueeze(1)
+        # bsz, tgt_len, _ = dummy_token.size()
+        # key_states = self._shape(self.k_proj(dummy_token), -1, bsz)
+        # value_states = self._shape(self.v_proj(dummy_token), -1, bsz)
+        # past_key_value = (key_states, value_states)
+        # past_key_values = past_key_value + past_key_values
+
         # past_key_values_length
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
 
         if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input) * self.embed_scale
+            # inputs_embeds = self.embed_tokens(input) * self.embed_scale
+            inputs_embeds = self.embed_tokens(input[:, 1:]) * self.embed_scale
+            dummy_token = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\dummy_token.pt")
+            dummy_token = torch.unsqueeze(dummy_token, dim=1)
+            inputs_embeds = torch.cat((dummy_token, inputs_embeds), dim=1)
+            # inputs_embeds = torch.cat((inputs_embeds[:, :1, :], dummy_token, inputs_embeds[:,1:, :]), dim=1)
+
+        ########################chz
+        # input_size = inputs_embeds.size()
+        # new_shape = input_size[:2]
+        ##########################
 
         if getattr(self.config, "_flash_attn_2_enabled", False):
             # 2d mask is passed through the layers
             attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
         else:
             # 4d mask is passed through the layers
+
             attention_mask = _prepare_4d_causal_attention_mask(
+                # attention_mask, new_shape, inputs_embeds, past_key_values_length
                 attention_mask, input_shape, inputs_embeds, past_key_values_length
             )
 
@@ -1274,6 +1323,7 @@ class BartDecoder(BartPreTrainedModel):
             else:
                 # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
                 encoder_attention_mask = _prepare_4d_attention_mask(
+                    # encoder_attention_mask, inputs_embeds.dtype, tgt_len=new_shape[-1]###############chz
                     encoder_attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1]
                 )
 
@@ -1479,6 +1529,22 @@ class BartModel(BartPreTrainedModel):
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
 
+        labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
+        label_mean = labels_means.to("cuda")
+        input_mean = torch.mean(encoder_outputs["last_hidden_state"], dim=1)
+
+        def find_most_similar_vectors(batch_vectors, target_vectors):
+            from torch.nn.functional import cosine_similarity
+            # 计算批次向量与目标向量的余弦相似度
+            similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
+            # 找到每个批次向量最相似的目标向量索引
+            most_similar_indices = torch.argmax(similarities, dim=1)
+            # 根据索引获取最相似的目标向量
+            most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
+            return most_similar_vectors
+
+        most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
+        torch.save(most_similar_vectors, "dummy_token.pt")
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
@@ -1584,7 +1650,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
 
         Returns:
         """
-        global average_decoder_input
+        # global average_decoder_input
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -1633,6 +1699,9 @@ class BartForConditionalGeneration(BartPreTrainedModel):
         if labels is not None:
             labels = labels.to(lm_logits.device)
             loss_fct = CrossEntropyLoss()
+
+            # extra_dim = torch.zeros(128, 1).to(lm_logits.device)
+            # label_with_extra = torch.cat((labels, extra_dim), dim=1)
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
             ##################chz
             labels_copy = labels.clone()
@@ -1690,7 +1759,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             encoder_last_hidden_state=outputs.encoder_last_hidden_state,
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
-            average_decoder_input=average_decoder_input,
+            # average_decoder_input=average_decoder_input,
         )
 
     def prepare_inputs_for_generation(

@@ -29,11 +29,11 @@ train_dataset = load_dataset('json', data_files='./data/train_subsets.json')
 test_dataset = load_dataset('json', data_files='./data/test_public.json')
 valid_dataset = load_dataset('json', data_files='./data/valid.json')
 
-# model_name = "IDEA-CCNL/Randeng-BART-139M"
+model_name = "IDEA-CCNL/Randeng-BART-139M"
 # model_name = "IDEA-CCNL/Randeng-BART-139M-SUMMARY"
 # model_name = "beyond/genius-base-chinese"
 # model_name = "./output/original_results/checkpoint-15500"
-model_name = "./output/lcstsm/version3/sentenceLoss/checkpoint-15500"
+# model_name = "./output/lcstsm/version3/sentenceLoss/checkpoint-15500"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = BartForConditionalGeneration.from_pretrained(model_name)
@@ -53,7 +53,7 @@ model.resize_token_embeddings(len(tokenizer))
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/version4/sentenceLoss",
+    output_dir="output/lcstsm/addDummyToken",
     num_train_epochs=20,
     do_train=True,
     do_eval=True,
@@ -65,7 +65,7 @@ args = Seq2SeqTrainingArguments(
     predict_with_generate=True,
     logging_dir="logs",
     logging_steps=500,
-    evaluation_strategy="epoch",  ## epoch
+    evaluation_strategy="no",  ## epoch
     save_total_limit=3,
     # generation_max_length最大生成长度，系统默认20 generation_num_beams=1表示贪心解码，大于1为树搜索
     generation_max_length=1024,
