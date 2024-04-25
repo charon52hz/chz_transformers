@@ -2649,6 +2649,8 @@ class GenerationMixin:
         if streamer is not None:
             streamer.end()
 
+        input_ids = torch.cat([input_ids[:, :1], input_ids[:, 2:]], dim=1)
+
         if return_dict_in_generate:
             if self.config.is_encoder_decoder:
                 return GreedySearchEncoderDecoderOutput(
