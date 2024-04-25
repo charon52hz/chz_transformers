@@ -1847,7 +1847,7 @@ class Trainer:
                     inputs["labels"] = torch.cat((inputs["labels"], label_add), dim=1)
 
                     shape2 = inputs["decoder_input_ids"].shape[0]
-                    decoder_input_add = torch.full((shape2, 1), 40003).to(inputs["decoder_input_ids"].device)
+                    decoder_input_add = torch.full((shape2, 1), 50000).to(inputs["decoder_input_ids"].device)
                     inputs["decoder_input_ids"] = torch.cat((decoder_input_add, inputs["decoder_input_ids"]), dim=1)
 
                     tr_loss_step = self.training_step(model, inputs)        ################## chz

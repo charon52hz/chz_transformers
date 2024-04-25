@@ -1589,7 +1589,7 @@ class GenerationMixin:
         if self.config.is_encoder_decoder and "encoder_outputs" not in model_kwargs:
             # if model is encoder decoder encoder_outputs are created
             # and added to `model_kwargs`
-            model_kwargs = self._prepare_encoder_decoder_kwargs_for_generation(
+            model_kwargs = self._prepare_encoder_decoder_kwargs_for_generation(         ###############根据input获得encoder_output
                 inputs_tensor, model_kwargs, model_input_name
             )
 
@@ -2558,7 +2558,11 @@ class GenerationMixin:
 
         # keep track of which sequences are already finished
         unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
-
+        ##########################chz
+        shape2 = input_ids.shape[0]
+        decoder_input_add = torch.full((shape2, 1), 50000).to(input_ids.device)
+        input_ids = torch.cat((input_ids, decoder_input_add), dim=1)
+        ##########################
         this_peer_finished = False  # used by synced_gpus only
         while True:
             if synced_gpus:

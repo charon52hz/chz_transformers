@@ -1130,6 +1130,27 @@ class BartEncoder(BartPreTrainedModel):
 
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
+
+
+        ###########################chz
+        labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
+        label_mean = labels_means.to("cuda")
+        input_mean = torch.mean(hidden_states, dim=1)
+
+        def find_most_similar_vectors(batch_vectors, target_vectors):
+            from torch.nn.functional import cosine_similarity
+            # 计算批次向量与目标向量的余弦相似度
+            similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
+            # 找到每个批次向量最相似的目标向量索引
+            most_similar_indices = torch.argmax(similarities, dim=1)
+            # 根据索引获取最相似的目标向量
+            most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
+            return most_similar_vectors
+
+        most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
+        torch.save(most_similar_vectors, "dummy_token.pt")
+        ##########################
+
         return BaseModelOutput(
             last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions,
             # another_vectors=most_similar_vectors  ############chz
@@ -1293,11 +1314,18 @@ class BartDecoder(BartPreTrainedModel):
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
 
         if inputs_embeds is None:
-            # inputs_embeds = self.embed_tokens(input) * self.embed_scale
-            inputs_embeds = self.embed_tokens(input[:, 1:]) * self.embed_scale
-            dummy_token = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\dummy_token.pt")
-            dummy_token = torch.unsqueeze(dummy_token, dim=1)
-            inputs_embeds = torch.cat((dummy_token, inputs_embeds), dim=1)
+            flag = torch.any(input == 50000)
+            if flag:
+                input = input[input != 50000]
+                input = input.unsqueeze(1)
+                dummy_token = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\dummy_token.pt")
+                dummy_token = torch.unsqueeze(dummy_token, dim=1)
+                dummy_token = dummy_token[:input.shape[0], :, :]
+                inputs_embeds = self.embed_tokens(input) * self.embed_scale
+                inputs_embeds = torch.cat((inputs_embeds, dummy_token), dim=1)
+            else:
+                inputs_embeds = self.embed_tokens(input) * self.embed_scale
+            # inputs_embeds = self.embed_tokens(input[:, 1:]) * self.embed_scale
             # inputs_embeds = torch.cat((inputs_embeds[:, :1, :], dummy_token, inputs_embeds[:,1:, :]), dim=1)
 
         ########################chz
@@ -1521,6 +1549,26 @@ class BartModel(BartPreTrainedModel):
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
             )
+
+            # ###########################
+            # labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
+            # label_mean = labels_means.to("cuda")
+            # input_mean = torch.mean(encoder_outputs["last_hidden_state"], dim=1)
+            #
+            # def find_most_similar_vectors(batch_vectors, target_vectors):
+            #     from torch.nn.functional import cosine_similarity
+            #     # 计算批次向量与目标向量的余弦相似度
+            #     similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
+            #     # 找到每个批次向量最相似的目标向量索引
+            #     most_similar_indices = torch.argmax(similarities, dim=1)
+            #     # 根据索引获取最相似的目标向量
+            #     most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
+            #     return most_similar_vectors
+            #
+            # most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
+            # torch.save(most_similar_vectors, "dummy_token.pt")
+            # ##########################3
+
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
             encoder_outputs = BaseModelOutput(
@@ -1529,22 +1577,7 @@ class BartModel(BartPreTrainedModel):
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
 
-        labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
-        label_mean = labels_means.to("cuda")
-        input_mean = torch.mean(encoder_outputs["last_hidden_state"], dim=1)
 
-        def find_most_similar_vectors(batch_vectors, target_vectors):
-            from torch.nn.functional import cosine_similarity
-            # 计算批次向量与目标向量的余弦相似度
-            similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
-            # 找到每个批次向量最相似的目标向量索引
-            most_similar_indices = torch.argmax(similarities, dim=1)
-            # 根据索引获取最相似的目标向量
-            most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
-            return most_similar_vectors
-
-        most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
-        torch.save(most_similar_vectors, "dummy_token.pt")
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
