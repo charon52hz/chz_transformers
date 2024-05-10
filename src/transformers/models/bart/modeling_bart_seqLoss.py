@@ -95,9 +95,9 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     """
     Shift input ids one token to the right.
     """
-    shifted_input_ids = input_ids.new_zeros(input_ids.shape)
-    shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()
-    shifted_input_ids[:, 0] = decoder_start_token_id
+    shifted_input_ids = input_ids.new_zeros(input_ids.shape)    # 128 * 87
+    shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()    # 128 * 86
+    shifted_input_ids[:, 0] = decoder_start_token_id    # 128 * 1
 
     if pad_token_id is None:
         raise ValueError("self.model.config.pad_token_id has to be defined.")
@@ -122,29 +122,6 @@ class BartLearnedPositionalEmbedding(nn.Embedding):
         """`input_ids' shape is expected to be [bsz x seqlen]."""
 
         bsz, seq_len = input_ids.shape[:2]
-        positions = torch.arange(
-            past_key_values_length, past_key_values_length + seq_len, dtype=torch.long, device=self.weight.device
-        ).expand(bsz, -1)
-
-        return super().forward(positions + self.offset)
-
-
-class CHZPositionalEmbedding(nn.Embedding):
-    """
-    This module learns positional embeddings up to a fixed maximum size.
-    """
-
-    def __init__(self, num_embeddings: int, embedding_dim: int):
-        # Bart is set up so that if padding_idx is specified then offset the embedding ids by 2
-        # and adjust num_embeddings appropriately. Other models don't have this hack
-        self.offset = 2
-        super().__init__(num_embeddings + self.offset, embedding_dim)
-
-    def forward(self, input_ids: torch.Tensor, past_key_values_length: int = 0):
-        """`input_ids' shape is expected to be [bsz x seqlen]."""
-
-        bsz, seq_len = input_ids.shape[:2]
-        seq_len = seq_len + 1
         positions = torch.arange(
             past_key_values_length, past_key_values_length + seq_len, dtype=torch.long, device=self.weight.device
         ).expand(bsz, -1)
@@ -974,8 +951,6 @@ class BartEncoder(BartPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-        # self.labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
-
     def get_input_embeddings(self):
         return self.embed_tokens
 
@@ -1048,22 +1023,6 @@ class BartEncoder(BartPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
-        # input_mean = torch.mean(inputs_embeds, dim=1)
-        # label_mean = self.labels_means.to("cuda")
-        #
-        # def find_most_similar_vectors(batch_vectors, target_vectors):
-        #     from torch.nn.functional import cosine_similarity
-        #     # 计算批次向量与目标向量的余弦相似度
-        #     similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
-        #     # 找到每个批次向量最相似的目标向量索引
-        #     most_similar_indices = torch.argmax(similarities, dim=1)
-        #     # 根据索引获取最相似的目标向量
-        #     most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
-        #     return most_similar_vectors
-        #
-        # most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
-        # inputs_embeds = torch.cat((most_similar_vectors.unsqueeze(1), inputs_embeds), dim=1)
-
         embed_pos = self.embed_positions(input)
         embed_pos = embed_pos.to(inputs_embeds.device)
 
@@ -1133,7 +1092,7 @@ class BartEncoder(BartPreTrainedModel):
 
 
         ###########################chz
-        labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
+        labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000-1.pt")
         label_mean = labels_means.to("cuda")
         input_mean = torch.mean(hidden_states, dim=1)
 
@@ -1144,16 +1103,15 @@ class BartEncoder(BartPreTrainedModel):
             # 找到每个批次向量最相似的目标向量索引
             most_similar_indices = torch.argmax(similarities, dim=1)
             # 根据索引获取最相似的目标向量
-            most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
-            return most_similar_vectors
+            # most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
+            return most_similar_indices
 
-        most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
-        torch.save(most_similar_vectors, "dummy_token.pt")
+        most_similar_indices = find_most_similar_vectors(input_mean, label_mean)
+        torch.save(most_similar_indices, "dummy_token_index.pt")
         ##########################
 
         return BaseModelOutput(
             last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions,
-            # another_vectors=most_similar_vectors  ############chz
         )
 
 
@@ -1189,9 +1147,6 @@ class BartDecoder(BartPreTrainedModel):
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         self.post_init()
-
-    def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):     ############ chz
-        return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
 
     def get_input_embeddings(self):
@@ -1300,38 +1255,22 @@ class BartDecoder(BartPreTrainedModel):
         else:
             raise ValueError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
 
-        #########chz
-        # dummy_token = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\dummy_token.pt")
-        # dummy_token = dummy_token.to("cuda")
-        # dummy_token = dummy_token.unsqueeze(1)
-        # bsz, tgt_len, _ = dummy_token.size()
-        # key_states = self._shape(self.k_proj(dummy_token), -1, bsz)
-        # value_states = self._shape(self.v_proj(dummy_token), -1, bsz)
-        # past_key_value = (key_states, value_states)
-        # past_key_values = past_key_value + past_key_values
-
         # past_key_values_length
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
 
         if inputs_embeds is None:
             flag = torch.any(input == 50000)
             if flag:
-                input = input[input != 50000]
-                input = input.unsqueeze(1)
-                dummy_token = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\dummy_token.pt")
-                dummy_token = torch.unsqueeze(dummy_token, dim=1)
-                dummy_token = dummy_token[:input.shape[0], :, :]
+                dummy_token_index = torch.load(r"dummy_token_index.pt")
+                batch_size = input.shape[0]
+                for i in range(batch_size):
+                    input[i][1] = dummy_token_index[i] + 40002
+
                 inputs_embeds = self.embed_tokens(input) * self.embed_scale
-                inputs_embeds = torch.cat((inputs_embeds, dummy_token), dim=1)
             else:
                 inputs_embeds = self.embed_tokens(input) * self.embed_scale
             # inputs_embeds = self.embed_tokens(input[:, 1:]) * self.embed_scale
             # inputs_embeds = torch.cat((inputs_embeds[:, :1, :], dummy_token, inputs_embeds[:,1:, :]), dim=1)
-
-        ########################chz
-        # input_size = inputs_embeds.size()
-        # new_shape = input_size[:2]
-        ##########################
 
         if getattr(self.config, "_flash_attn_2_enabled", False):
             # 2d mask is passed through the layers
@@ -1550,25 +1489,6 @@ class BartModel(BartPreTrainedModel):
                 return_dict=return_dict,
             )
 
-            # ###########################
-            # labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000.pt")
-            # label_mean = labels_means.to("cuda")
-            # input_mean = torch.mean(encoder_outputs["last_hidden_state"], dim=1)
-            #
-            # def find_most_similar_vectors(batch_vectors, target_vectors):
-            #     from torch.nn.functional import cosine_similarity
-            #     # 计算批次向量与目标向量的余弦相似度
-            #     similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
-            #     # 找到每个批次向量最相似的目标向量索引
-            #     most_similar_indices = torch.argmax(similarities, dim=1)
-            #     # 根据索引获取最相似的目标向量
-            #     most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
-            #     return most_similar_vectors
-            #
-            # most_similar_vectors = find_most_similar_vectors(input_mean, label_mean)
-            # torch.save(most_similar_vectors, "dummy_token.pt")
-            # ##########################3
-
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
             encoder_outputs = BaseModelOutput(
@@ -1576,8 +1496,6 @@ class BartModel(BartPreTrainedModel):
                 hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
-
-
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
@@ -1730,6 +1648,11 @@ class BartForConditionalGeneration(BartPreTrainedModel):
 
         masked_lm_loss = None
         if labels is not None:
+            batch_size = labels.shape[0]
+            index = torch.load(r"dummy_token_index.pt")
+            index = index.unsqueeze(1)
+            labels = labels[:, :-1]
+            labels = torch.cat((index[:, :batch_size] + 40002, labels[:, :]), dim=1)
             labels = labels.to(lm_logits.device)
             loss_fct = CrossEntropyLoss()
 
@@ -1737,46 +1660,46 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             # label_with_extra = torch.cat((labels, extra_dim), dim=1)
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
             ##################chz
-            labels_copy = labels.clone()
-            labels_copy.masked_fill_(labels == -100, self.config.pad_token_id)
-            gen_input_ids = torch.argmax(lm_logits, dim=2)  # 21*40004 -> 21
-
-            gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
-            gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
-
-            label_sequence_lengths = torch.ne(labels_copy, self.config.pad_token_id).sum(-1)
-            label_sequence_matrix = torch.ne(labels_copy, self.config.pad_token_id).int().float()
-
-            shared_decoder_outputs = self.model.encoder(gen_input_ids)["last_hidden_state"] # 生成的token的embedding
-            shared_decoder_inputs = self.model.encoder(labels_copy)["last_hidden_state"]    # 标签的token的embedding
-
-            res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))    # 去除0值的embedding
-            sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)   # 求和
-            average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1) # 算平均
-
-            res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
-            sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
-            average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
-
-            # lm_logits2 = self.lm_head(average_decoder_output)
-            # aver_token = torch.argmax(lm_logits2, dim=2)
-            # aver_idx = aver_token.cpu().numpy()
-            # from transformers import AutoTokenizer
-            # model_name = "IDEA-CCNL/Randeng-BART-139M"
-            # tokenizer = AutoTokenizer.from_pretrained(model_name)
-            # gen_tokens = tokenizer.batch_decode(aver_idx)
+            # labels_copy = labels.clone()
+            # labels_copy.masked_fill_(labels == -100, self.config.pad_token_id)
+            # gen_input_ids = torch.argmax(lm_logits, dim=2)  # 21*40004 -> 21
             #
-            # lm_logits3 = self.lm_head(average_decoder_input)
-            # aver_input = torch.argmax(lm_logits3, dim=2)
-            # aver_input_dx = aver_input.cpu().numpy()
-            # input_tokens = tokenizer.batch_decode(aver_input_dx)
-
-            similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
-            similarity_target = torch.ones_like(similarity)
-            similarity_loss = torch.nn.functional.mse_loss(similarity, similarity_target)
+            # gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
+            # gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
+            #
+            # label_sequence_lengths = torch.ne(labels_copy, self.config.pad_token_id).sum(-1)
+            # label_sequence_matrix = torch.ne(labels_copy, self.config.pad_token_id).int().float()
+            #
+            # shared_decoder_outputs = self.model.encoder(gen_input_ids)["last_hidden_state"] # 生成的token的embedding
+            # shared_decoder_inputs = self.model.encoder(labels_copy)["last_hidden_state"]    # 标签的token的embedding
+            #
+            # res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))    # 去除0值的embedding
+            # sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)   # 求和
+            # average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1) # 算平均
+            #
+            # res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
+            # sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
+            # average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
+            #
+            # # lm_logits2 = self.lm_head(average_decoder_output)
+            # # aver_token = torch.argmax(lm_logits2, dim=2)
+            # # aver_idx = aver_token.cpu().numpy()
+            # # from transformers import AutoTokenizer
+            # # model_name = "IDEA-CCNL/Randeng-BART-139M"
+            # # tokenizer = AutoTokenizer.from_pretrained(model_name)
+            # # gen_tokens = tokenizer.batch_decode(aver_idx)
+            # #
+            # # lm_logits3 = self.lm_head(average_decoder_input)
+            # # aver_input = torch.argmax(lm_logits3, dim=2)
+            # # aver_input_dx = aver_input.cpu().numpy()
+            # # input_tokens = tokenizer.batch_decode(aver_input_dx)
+            #
+            # similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
+            # similarity_target = torch.ones_like(similarity)
+            # similarity_loss = torch.nn.functional.mse_loss(similarity, similarity_target)
             #####################
 
-            masked_lm_loss = masked_lm_loss + similarity_loss
+            # masked_lm_loss = masked_lm_loss + similarity_loss
 
         if not return_dict:
             output = (lm_logits,) + outputs[1:]

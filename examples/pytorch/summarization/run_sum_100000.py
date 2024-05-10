@@ -31,10 +31,9 @@ valid_dataset = load_dataset('json', data_files='./data/valid.json')
 
 # model_name = "IDEA-CCNL/Randeng-BART-139M"
 # model_name = "IDEA-CCNL/Randeng-BART-139M-SUMMARY"
-# model_name = "beyond/genius-base-chinese"
 # model_name = "./output/original_results/checkpoint-15500"
 # model_name = "./output/lcstsm/version3/sentenceLoss/checkpoint-15500"
-model_name = "./output/lcstsm/addDummyToken/checkpoint-15500"
+model_name = "./output/lcstsm/add_token_index2/checkpoint-15500"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = BartForConditionalGeneration.from_pretrained(model_name)
@@ -43,18 +42,22 @@ data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 max_input_length = 1024
 max_target_length = 1024
 
-prefix1 = "summary:"
-prefix2 = "n-summary:"
-
-# new_words = ["summary", "n-summary", "<del>"]
-new_words = ["summary", "n-summary"]
-# new_words.extend([str(i) for i in range(1, 513)])
-tokenizer.add_tokens(new_words)
-model.resize_token_embeddings(len(tokenizer))
+# original_len = len(tokenizer)
+# labels = torch.load(r"labels_means5000-1.pt")
+# nums = labels.shape[0]
+# for i in range(nums):
+#     new_word = "add_token" + str(i)
+#     tokenizer.add_tokens(new_word)
+#
+# model.resize_token_embeddings(len(tokenizer))   # 重新embed调整矩阵维度
+#
+# for i in range(nums):
+#     with torch.no_grad():
+#         model.model.shared.weight[original_len + i, :] = labels[i, :]
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/addDummyToken",
+    output_dir="output/lcstsm/add_token_index2",
     num_train_epochs=20,
     do_train=True,
     do_eval=True,
@@ -75,7 +78,7 @@ args = Seq2SeqTrainingArguments(
 )
 
 def preprocess_function001(examples):
-    inputs = [prefix1 + doc for doc in examples["text"]]
+    inputs = [doc for doc in examples["text"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, truncation=True)
 
     # Setup the tokenizer for targets
@@ -85,38 +88,38 @@ def preprocess_function001(examples):
     model_inputs["labels"] = labels["input_ids"]
     return model_inputs
 
-def preprocess_function002(examples):
-    inputs = [prefix2 + doc for doc in examples["text"]]
-    model_inputs = tokenizer(inputs, max_length=max_input_length, truncation=True)
-
-    # Setup the tokenizer for targets
-    with tokenizer.as_target_tokenizer():
-        labels = tokenizer(examples["n-summary"], max_length=max_target_length, truncation=True)
-
-    model_inputs["labels"] = labels["input_ids"]
-    return model_inputs
-
-def preprocess_function1(examples):
-    inputs1 = [prefix1 + doc for doc in examples["train"]["text"]]
-    inputs2 = [prefix2 + doc for doc in examples["train"]["text"]]
-
-    model_inputs1 = tokenizer(inputs1, max_length=max_input_length, truncation=True)
-    model_inputs2 = tokenizer(inputs2, max_length=max_input_length, truncation=True)
-
-    # Setup the tokenizer for targets
-    with tokenizer.as_target_tokenizer():
-        labels1 = tokenizer(examples["train"]["summary"], max_length=max_target_length, truncation=True)
-        labels2 = tokenizer(examples["train"]["n-summary"], max_length=max_target_length, truncation=True)
-
-    model_inputs1["labels"] = labels1["input_ids"]
-    model_inputs2["labels"] = labels2["input_ids"]
-
-    model_inputs = copy.deepcopy(model_inputs1)
-    model_inputs['input_ids'].extend(model_inputs2['input_ids'])
-    model_inputs["labels"].extend(model_inputs2["labels"])
-    model_inputs['attention_mask'].extend(model_inputs2['attention_mask'])
-
-    return model_inputs
+# def preprocess_function002(examples):
+#     inputs = [prefix2 + doc for doc in examples["text"]]
+#     model_inputs = tokenizer(inputs, max_length=max_input_length, truncation=True)
+#
+#     # Setup the tokenizer for targets
+#     with tokenizer.as_target_tokenizer():
+#         labels = tokenizer(examples["n-summary"], max_length=max_target_length, truncation=True)
+#
+#     model_inputs["labels"] = labels["input_ids"]
+#     return model_inputs
+#
+# def preprocess_function1(examples):
+#     inputs1 = [prefix1 + doc for doc in examples["train"]["text"]]
+#     inputs2 = [prefix2 + doc for doc in examples["train"]["text"]]
+#
+#     model_inputs1 = tokenizer(inputs1, max_length=max_input_length, truncation=True)
+#     model_inputs2 = tokenizer(inputs2, max_length=max_input_length, truncation=True)
+#
+#     # Setup the tokenizer for targets
+#     with tokenizer.as_target_tokenizer():
+#         labels1 = tokenizer(examples["train"]["summary"], max_length=max_target_length, truncation=True)
+#         labels2 = tokenizer(examples["train"]["n-summary"], max_length=max_target_length, truncation=True)
+#
+#     model_inputs1["labels"] = labels1["input_ids"]
+#     model_inputs2["labels"] = labels2["input_ids"]
+#
+#     model_inputs = copy.deepcopy(model_inputs1)
+#     model_inputs['input_ids'].extend(model_inputs2['input_ids'])
+#     model_inputs["labels"].extend(model_inputs2["labels"])
+#     model_inputs['attention_mask'].extend(model_inputs2['attention_mask'])
+#
+#     return model_inputs
 
 def main():
 
@@ -138,19 +141,19 @@ def main():
     )
 
     # 评估时：
-    # eval_result = trainer.evaluate()
-    # print(eval_result)
+    eval_result = trainer.evaluate()
+    print(eval_result)
 
     # 训练时：
-    # train_result = trainer.train(resume_from_checkpoint=True)
-    train_result = trainer.train()
-    print(train_result)
-
-    trainer.save_model()
-    metrics = train_result.metrics
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
-    trainer.save_state()
+    # # train_result = trainer.train(resume_from_checkpoint=True)
+    # train_result = trainer.train()
+    # print(train_result)
+    #
+    # trainer.save_model()
+    # metrics = train_result.metrics
+    # trainer.log_metrics("train", metrics)
+    # trainer.save_metrics("train", metrics)
+    # trainer.save_state()
 
 # 这里用的是中文lawrouge 至于字符级还是词级计算看自己调整 这里是字符级
 def compute_metrics(eval_pred):
