@@ -2561,7 +2561,7 @@ class GenerationMixin:
         ##########################chz
         shape2 = input_ids.shape[0]
         decoder_input_add = torch.full((shape2, 1), 50000).to(input_ids.device)
-        input_ids = torch.cat((input_ids, decoder_input_add), dim=1)
+        input_ids = torch.cat((decoder_input_add, input_ids), dim=1)
         ##########################
         this_peer_finished = False  # used by synced_gpus only
         while True:
@@ -2649,7 +2649,7 @@ class GenerationMixin:
         if streamer is not None:
             streamer.end()
 
-        input_ids = torch.cat((input_ids[:, :1], input_ids[:, 2:]), dim=1) ##################chz
+        input_ids = input_ids[:, 1:]
 
         if return_dict_in_generate:
             if self.config.is_encoder_decoder:

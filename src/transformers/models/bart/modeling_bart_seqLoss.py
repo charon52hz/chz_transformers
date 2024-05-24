@@ -95,9 +95,9 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     """
     Shift input ids one token to the right.
     """
-    shifted_input_ids = input_ids.new_zeros(input_ids.shape)
-    shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()
-    shifted_input_ids[:, 0] = decoder_start_token_id
+    shifted_input_ids = input_ids.new_zeros(input_ids.shape)    # 128 * 87
+    shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()    # 128 * 86
+    shifted_input_ids[:, 0] = decoder_start_token_id    # 128 * 1
 
     if pad_token_id is None:
         raise ValueError("self.model.config.pad_token_id has to be defined.")
@@ -1032,6 +1032,7 @@ class BartEncoder(BartPreTrainedModel):
 
         # expand attention_mask
         if attention_mask is not None:
+            # attention_mask = torch.cat((torch.ones(128, 1, dtype=torch.int).to("cuda"), attention_mask), dim=1)
             if getattr(self.config, "_flash_attn_2_enabled", False):
                 attention_mask = attention_mask if 0 in attention_mask else None
             else:
@@ -1088,8 +1089,29 @@ class BartEncoder(BartPreTrainedModel):
 
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
+
+
+        ###########################chz
+        labels_means = torch.load(r"E:\chz1\pythonRep\transformers\examples\pytorch\summarization\labels_means5000-1.pt")
+        label_mean = labels_means.to("cuda")
+        input_mean = torch.mean(hidden_states, dim=1)
+
+        def find_most_similar_vectors(batch_vectors, target_vectors):
+            from torch.nn.functional import cosine_similarity
+            # 计算批次向量与目标向量的余弦相似度
+            similarities = cosine_similarity(batch_vectors.unsqueeze(1), target_vectors.unsqueeze(0), dim=2)
+            # 找到每个批次向量最相似的目标向量索引
+            most_similar_indices = torch.argmax(similarities, dim=1)
+            # 根据索引获取最相似的目标向量
+            # most_similar_vectors = torch.index_select(target_vectors, dim=0, index=most_similar_indices)
+            return most_similar_indices
+
+        most_similar_indices = find_most_similar_vectors(input_mean, label_mean)
+        torch.save(most_similar_indices, "dummy_token_index.pt")
+        ##########################
+
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions,
         )
 
 
@@ -1125,6 +1147,7 @@ class BartDecoder(BartPreTrainedModel):
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         self.post_init()
+
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1236,14 +1259,27 @@ class BartDecoder(BartPreTrainedModel):
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
 
         if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input) * self.embed_scale
+            flag = torch.any(input == 50000)
+            if flag:
+                dummy_token_index = torch.load(r"dummy_token_index.pt")
+                batch_size = input.shape[0]
+                for i in range(batch_size):
+                    input[i][1] = dummy_token_index[i] + 40002
+
+                inputs_embeds = self.embed_tokens(input) * self.embed_scale
+            else:
+                inputs_embeds = self.embed_tokens(input) * self.embed_scale
+            # inputs_embeds = self.embed_tokens(input[:, 1:]) * self.embed_scale
+            # inputs_embeds = torch.cat((inputs_embeds[:, :1, :], dummy_token, inputs_embeds[:,1:, :]), dim=1)
 
         if getattr(self.config, "_flash_attn_2_enabled", False):
             # 2d mask is passed through the layers
             attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
         else:
             # 4d mask is passed through the layers
+
             attention_mask = _prepare_4d_causal_attention_mask(
+                # attention_mask, new_shape, inputs_embeds, past_key_values_length
                 attention_mask, input_shape, inputs_embeds, past_key_values_length
             )
 
@@ -1254,6 +1290,7 @@ class BartDecoder(BartPreTrainedModel):
             else:
                 # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
                 encoder_attention_mask = _prepare_4d_attention_mask(
+                    # encoder_attention_mask, inputs_embeds.dtype, tgt_len=new_shape[-1]###############chz
                     encoder_attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1]
                 )
 
@@ -1451,6 +1488,7 @@ class BartModel(BartPreTrainedModel):
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
             )
+
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
             encoder_outputs = BaseModelOutput(
@@ -1563,7 +1601,8 @@ class BartForConditionalGeneration(BartPreTrainedModel):
 
         Returns:
         """
-        global average_decoder_input
+        # global average_decoder_input
+
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if labels is not None:
@@ -1609,50 +1648,58 @@ class BartForConditionalGeneration(BartPreTrainedModel):
 
         masked_lm_loss = None
         if labels is not None:
+            batch_size = labels.shape[0]
+            index = torch.load(r"dummy_token_index.pt")
+            index = index.unsqueeze(1)
+            labels = labels[:, :-1]
+            labels = torch.cat((index[:, :batch_size] + 40002, labels[:, :]), dim=1)
             labels = labels.to(lm_logits.device)
             loss_fct = CrossEntropyLoss()
+
+            # extra_dim = torch.zeros(128, 1).to(lm_logits.device)
+            # label_with_extra = torch.cat((labels, extra_dim), dim=1)
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
             ##################chz
-            labels_copy = labels.clone()
-            labels_copy.masked_fill_(labels == -100, self.config.pad_token_id)
-            gen_input_ids = torch.argmax(lm_logits, dim=2)  # 21*40004 -> 21
-
-            gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
-            gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
-
-            label_sequence_lengths = torch.ne(labels_copy, self.config.pad_token_id).sum(-1)
-            label_sequence_matrix = torch.ne(labels_copy, self.config.pad_token_id).int().float()
-
-            shared_decoder_outputs = self.model.shared(gen_input_ids)
-            shared_decoder_inputs = self.model.shared(labels_copy)
-
-            res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))
-            sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)
-            average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1)
-
-            res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
-            sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
-            average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
-
-            # lm_logits2 = self.lm_head(average_decoder_output)
-            # aver_token = torch.argmax(lm_logits2, dim=2)
-            # aver_idx = aver_token.cpu().numpy()
-            # from transformers import AutoTokenizer
-            # model_name = "IDEA-CCNL/Randeng-BART-139M"
-            # tokenizer = AutoTokenizer.from_pretrained(model_name)
-            # gen_tokens = tokenizer.batch_decode(aver_idx)
+            # labels_copy = labels.clone()
+            # labels_copy.masked_fill_(labels == -100, self.config.pad_token_id)
+            # gen_input_ids = torch.argmax(lm_logits, dim=2)  # 21*40004 -> 21
             #
-            # lm_logits3 = self.lm_head(average_decoder_input)
-            # aver_input = torch.argmax(lm_logits3, dim=2)
-            # aver_input_dx = aver_input.cpu().numpy()
-            # input_tokens = tokenizer.batch_decode(aver_input_dx)
-
-            similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
-            similarity_target = torch.ones_like(similarity)
-            similarity_loss = torch.nn.functional.mse_loss(similarity, similarity_target)
+            # gen_sequence_lengths = torch.ne(gen_input_ids, self.config.pad_token_id).sum(-1)
+            # gen_sequence_matrix = torch.ne(gen_input_ids, self.config.pad_token_id).int().float()
+            #
+            # label_sequence_lengths = torch.ne(labels_copy, self.config.pad_token_id).sum(-1)
+            # label_sequence_matrix = torch.ne(labels_copy, self.config.pad_token_id).int().float()
+            #
+            # shared_decoder_outputs = self.model.encoder(gen_input_ids)["last_hidden_state"] # 生成的token的embedding
+            # shared_decoder_inputs = self.model.encoder(labels_copy)["last_hidden_state"]    # 标签的token的embedding
+            #
+            # res1 = torch.mul(shared_decoder_outputs, gen_sequence_matrix.unsqueeze(-1))    # 去除0值的embedding
+            # sum1 = torch.unsqueeze(torch.sum(res1, dim=1), dim=1)   # 求和
+            # average_decoder_output = sum1 / gen_sequence_lengths.view(-1, 1, 1) # 算平均
+            #
+            # res2 = torch.mul(shared_decoder_inputs, label_sequence_matrix.unsqueeze(-1))
+            # sum2 = torch.unsqueeze(torch.sum(res2, dim=1), dim=1)
+            # average_decoder_input = sum2 / label_sequence_lengths.view(-1, 1, 1)
+            #
+            # # lm_logits2 = self.lm_head(average_decoder_output)
+            # # aver_token = torch.argmax(lm_logits2, dim=2)
+            # # aver_idx = aver_token.cpu().numpy()
+            # # from transformers import AutoTokenizer
+            # # model_name = "IDEA-CCNL/Randeng-BART-139M"
+            # # tokenizer = AutoTokenizer.from_pretrained(model_name)
+            # # gen_tokens = tokenizer.batch_decode(aver_idx)
+            # #
+            # # lm_logits3 = self.lm_head(average_decoder_input)
+            # # aver_input = torch.argmax(lm_logits3, dim=2)
+            # # aver_input_dx = aver_input.cpu().numpy()
+            # # input_tokens = tokenizer.batch_decode(aver_input_dx)
+            #
+            # similarity = torch.nn.functional.cosine_similarity(average_decoder_output, average_decoder_input, dim=-1)
+            # similarity_target = torch.ones_like(similarity)
+            # similarity_loss = torch.nn.functional.mse_loss(similarity, similarity_target)
             #####################
 
-            masked_lm_loss = masked_lm_loss + similarity_loss
+            # masked_lm_loss = masked_lm_loss + similarity_loss
 
         if not return_dict:
             output = (lm_logits,) + outputs[1:]
@@ -1668,7 +1715,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             encoder_last_hidden_state=outputs.encoder_last_hidden_state,
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
-            average_decoder_input=average_decoder_input,
+            # average_decoder_input=average_decoder_input,
         )
 
     def prepare_inputs_for_generation(
