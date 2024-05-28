@@ -1262,7 +1262,7 @@ class BartDecoder(BartPreTrainedModel):
                 dummy_token_index = torch.load(r"dummy_token_index.pt")
                 batch_size = input.shape[0]
                 for i in range(batch_size):
-                    input[i][1] = dummy_token_index[i] + 40002
+                    input[i][1] = dummy_token_index[i] + 40004
 
                 inputs_embeds = self.embed_tokens(input) * self.embed_scale
             else:
@@ -1651,7 +1651,7 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             index = torch.load(r"dummy_token_index.pt")
             index = index.unsqueeze(1)
             labels = labels[:, :-1]
-            labels = torch.cat((index[:, :batch_size] + 40002, labels[:, :]), dim=1)
+            labels = torch.cat((index[:, :batch_size] + 40004, labels[:, :]), dim=1)
             labels = labels.to(lm_logits.device)
             loss_fct = CrossEntropyLoss()
 
