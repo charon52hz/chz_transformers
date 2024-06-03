@@ -33,7 +33,7 @@ model_name = "IDEA-CCNL/Randeng-BART-139M"
 # model_name = "IDEA-CCNL/Randeng-BART-139M-SUMMARY"
 # model_name = "./output/original_results/checkpoint-15500"
 # model_name = "./output/lcstsm/version3/sentenceLoss/checkpoint-15500"
-# model_name = "./output/lcstsm/add_token_index2/checkpoint-15500"
+# model_name = "./output/lcstsm/add_token_index_allAndHalf/checkpoint-15500"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = BartForConditionalGeneration.from_pretrained(model_name)
@@ -64,8 +64,8 @@ for i in range(nums):
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/add_token_index4",
-    num_train_epochs=20,
+    output_dir="output/lcstsm/add_token_index_allAndHalf2",
+    num_train_epochs=40,
     do_train=True,
     do_eval=True,
     per_device_train_batch_size=batch_size,

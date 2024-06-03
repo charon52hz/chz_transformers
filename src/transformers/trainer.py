@@ -1843,11 +1843,11 @@ class Trainer:
 
                 with self.accelerator.accumulate(model):
                     shape1 = inputs["labels"].shape[0]
-                    label_add = torch.full((shape1, 1), -100).to(inputs["labels"].device)
+                    label_add = torch.full((shape1, 3), -100).to(inputs["labels"].device)
                     inputs["labels"] = torch.cat((inputs["labels"], label_add), dim=1)
 
                     shape2 = inputs["decoder_input_ids"].shape[0]
-                    decoder_input_add = torch.full((shape2, 1), 50000).to(inputs["decoder_input_ids"].device)
+                    decoder_input_add = torch.full((shape2, 3), 50000).to(inputs["decoder_input_ids"].device)
                     inputs["decoder_input_ids"] = torch.cat((inputs["decoder_input_ids"][:, :1], decoder_input_add, inputs["decoder_input_ids"][:, 1:]), dim=1)
 
                     tr_loss_step = self.training_step(model, inputs)        ################## chz
