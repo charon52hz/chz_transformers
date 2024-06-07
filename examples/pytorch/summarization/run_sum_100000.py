@@ -42,12 +42,12 @@ data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 max_input_length = 1024
 max_target_length = 1024
 
-prefix1 = "summary:"
-prefix2 = "n-summary:"
-
-new_words = ["summary", "n-summary"]
-tokenizer.add_tokens(new_words)
-model.resize_token_embeddings(len(tokenizer))
+# prefix1 = "summary:"
+# prefix2 = "n-summary:"
+#
+# new_words = ["summary", "n-summary"]
+# tokenizer.add_tokens(new_words)
+# model.resize_token_embeddings(len(tokenizer))
 
 original_len = len(tokenizer)
 labels = torch.load(r"labels_means5000-1.pt")
@@ -64,8 +64,8 @@ for i in range(nums):
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/add_token_index_allAndHalf2",
-    num_train_epochs=40,
+    output_dir="output/lcstsm/add_tokenIndex_1",
+    num_train_epochs=30,
     do_train=True,
     do_eval=True,
     per_device_train_batch_size=batch_size,
@@ -85,7 +85,7 @@ args = Seq2SeqTrainingArguments(
 )
 
 def preprocess_function001(examples):
-    inputs = [prefix1 + doc for doc in examples["text"]]
+    inputs = [doc for doc in examples["text"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, truncation=True)
 
     # Setup the tokenizer for targets

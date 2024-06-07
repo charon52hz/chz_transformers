@@ -1032,20 +1032,20 @@ class BartEncoder(BartPreTrainedModel):
         actually_input_embeds = torch.mul(inputs_embeds, input_matrix.unsqueeze(-1))
         input_mean = torch.unsqueeze(torch.sum(actually_input_embeds, dim=1), dim=1) / input_length.view(-1, 1, 1)
 
-        input_left_mean = torch.empty(1, 1, 768).to("cuda")
-        input_right_mean = torch.empty(1, 1, 768).to("cuda")
-        input_length = input_length.unsqueeze(1)
-        for i in range(input_length.shape[0]):
-            split_point = input_length[i].item() // 2
-            one_input_left = actually_input_embeds[i, :split_point, :]
-            one_input_right = actually_input_embeds[i, split_point:input_length[i].item(), :]
-            one_input_left_mean = torch.mean(one_input_left, dim=0)
-            one_input_left_mean = one_input_left_mean.unsqueeze(0).unsqueeze(0)
-            one_input_right_mean = torch.mean(one_input_right, dim=0)
-            one_input_right_mean = one_input_right_mean.unsqueeze(0).unsqueeze(0)
-
-            input_left_mean = torch.cat((input_left_mean, one_input_left_mean), dim=0)
-            input_right_mean = torch.cat((input_right_mean, one_input_right_mean), dim=0)
+        # input_left_mean = torch.empty(1, 1, 768).to("cuda")
+        # input_right_mean = torch.empty(1, 1, 768).to("cuda")
+        # input_length = input_length.unsqueeze(1)
+        # for i in range(input_length.shape[0]):
+        #     split_point = input_length[i].item() // 2
+        #     one_input_left = actually_input_embeds[i, :split_point, :]
+        #     one_input_right = actually_input_embeds[i, split_point:input_length[i].item(), :]
+        #     one_input_left_mean = torch.mean(one_input_left, dim=0)
+        #     one_input_left_mean = one_input_left_mean.unsqueeze(0).unsqueeze(0)
+        #     one_input_right_mean = torch.mean(one_input_right, dim=0)
+        #     one_input_right_mean = one_input_right_mean.unsqueeze(0).unsqueeze(0)
+        #
+        #     input_left_mean = torch.cat((input_left_mean, one_input_left_mean), dim=0)
+        #     input_right_mean = torch.cat((input_right_mean, one_input_right_mean), dim=0)
 
         def find_most_similar_vectors(batch_vectors, target_vectors):
             from torch.nn.functional import cosine_similarity
@@ -1058,13 +1058,13 @@ class BartEncoder(BartPreTrainedModel):
             return most_similar_indices
 
         most_similar_indices = find_most_similar_vectors(input_mean, label_mean)
-        input_left_mean = input_left_mean[1:, :, :]
-        input_right_mean = input_right_mean[1:, :, :]
-        most_similar_left_indices = find_most_similar_vectors(input_left_mean, label_mean)
-        most_similar_right_indices = find_most_similar_vectors(input_right_mean, label_mean)
+        # input_left_mean = input_left_mean[1:, :, :]
+        # input_right_mean = input_right_mean[1:, :, :]
+        # most_similar_left_indices = find_most_similar_vectors(input_left_mean, label_mean)
+        # most_similar_right_indices = find_most_similar_vectors(input_right_mean, label_mean)
         torch.save(most_similar_indices, "dummy_token_index.pt")
-        torch.save(most_similar_left_indices, "dummy_token_left_index.pt")
-        torch.save(most_similar_right_indices, "dummy_token_right_index.pt")
+        # torch.save(most_similar_left_indices, "dummy_token_left_index.pt")
+        # torch.save(most_similar_right_indices, "dummy_token_right_index.pt")
         ##########################
         embed_pos = self.embed_positions(input)
         embed_pos = embed_pos.to(inputs_embeds.device)
@@ -1285,13 +1285,13 @@ class BartDecoder(BartPreTrainedModel):
             flag = torch.any(input == 50000)
             if flag:
                 dummy_token_index = torch.load(r"dummy_token_index.pt")
-                dummy_token_left_index = torch.load(r"dummy_token_left_index.pt")
-                dummy_token_right_index = torch.load(r"dummy_token_right_index.pt")
+                # dummy_token_left_index = torch.load(r"dummy_token_left_index.pt")
+                # dummy_token_right_index = torch.load(r"dummy_token_right_index.pt")
                 batch_size = input.shape[0]
                 for i in range(batch_size):
-                    input[i][1] = dummy_token_index[i] + 40004
-                    input[i][2] = dummy_token_left_index[i] + 40004
-                    input[i][3] = dummy_token_right_index[i] + 40004
+                    input[i][1] = dummy_token_index[i] + 40002
+                    # input[i][2] = dummy_token_left_index[i] + 40004
+                    # input[i][3] = dummy_token_right_index[i] + 40004
 
                 inputs_embeds = self.embed_tokens(input) * self.embed_scale
             else:
@@ -1677,12 +1677,12 @@ class BartForConditionalGeneration(BartPreTrainedModel):
         masked_lm_loss = None
         if labels is not None:
             batch_size = labels.shape[0]
-            index = torch.load(r"dummy_token_index.pt")
-            index = index.unsqueeze(1)
-            index_left = torch.load(r"dummy_token_left_index.pt").unsqueeze(1)
-            index_right = torch.load(r"dummy_token_right_index.pt").unsqueeze(1)
-            labels = labels[:, :-3]
-            labels = torch.cat((index[:, :batch_size] + 40004, index_left[:, :batch_size] + 40004, index_right[:, :batch_size] + 40004, labels[:, :]), dim=1)
+            index = torch.load(r"dummy_token_index.pt").unsqueeze(1)
+            # index_left = torch.load(r"dummy_token_left_index.pt").unsqueeze(1)
+            # index_right = torch.load(r"dummy_token_right_index.pt").unsqueeze(1)
+            labels = labels[:, :-1]
+            # labels = torch.cat((index[:, :batch_size] + 40002, index_left[:, :batch_size] + 40002, index_right[:, :batch_size] + 40002, labels[:, :]), dim=1)
+            labels = torch.cat((index[:, :batch_size] + 40002, labels[:, :]), dim=1)
             labels = labels.to(lm_logits.device)
             loss_fct = CrossEntropyLoss()
 
