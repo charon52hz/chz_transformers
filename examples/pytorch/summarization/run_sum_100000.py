@@ -23,7 +23,7 @@ from transformers import (
 # torch.cuda.manual_seed_all(seed)
 
 # 加载数据集
-from transformers.models.bart.modeling_bart_seqLoss import BartForConditionalGeneration
+from transformers.models.bart.modeling_bart_addToken2encoder import BartForConditionalGeneration
 
 train_dataset = load_dataset('json', data_files='./data/train_subsets.json')
 test_dataset = load_dataset('json', data_files='./data/test_public.json')
@@ -49,22 +49,22 @@ max_target_length = 1024
 # tokenizer.add_tokens(new_words)
 # model.resize_token_embeddings(len(tokenizer))
 
-original_len = len(tokenizer)
-labels = torch.load(r"labels_means5000-1.pt")
-nums = labels.shape[0]
-for i in range(nums):
-    new_word = "add_token" + str(i)
-    tokenizer.add_tokens(new_word)
-
-model.resize_token_embeddings(len(tokenizer))   # 重新embed调整矩阵维度
-
-for i in range(nums):
-    with torch.no_grad():
-        model.model.shared.weight[original_len + i, :] = labels[i, :]
+# original_len = len(tokenizer)
+# labels = torch.load(r"labels_means5000-1.pt")
+# nums = labels.shape[0]
+# for i in range(nums):
+#     new_word = "add_token" + str(i)
+#     tokenizer.add_tokens(new_word)
+#
+# model.resize_token_embeddings(len(tokenizer))   # 重新embed调整矩阵维度
+#
+# for i in range(nums):
+#     with torch.no_grad():
+#         model.model.shared.weight[original_len + i, :] = labels[i, :]
 
 batch_size = 128
 args = Seq2SeqTrainingArguments(
-    output_dir="output/lcstsm/add_tokenIndex_1",
+    output_dir="output/lcstsm/lossAdd",
     num_train_epochs=30,
     do_train=True,
     do_eval=True,
@@ -85,6 +85,7 @@ args = Seq2SeqTrainingArguments(
 )
 
 def preprocess_function001(examples):
+    # inputs = ["or or or" + doc for doc in examples["text"]]
     inputs = [doc for doc in examples["text"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, truncation=True)
 

@@ -167,3 +167,4 @@ tags
 
 # ruff
 .ruff_cache
+/examples/pytorch/summarization/100-2.png
