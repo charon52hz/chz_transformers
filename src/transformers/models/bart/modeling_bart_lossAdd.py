@@ -1493,6 +1493,46 @@ class BartModel(BartPreTrainedModel):
 @add_start_docstrings(
     "The BART Model with a language modeling head. Can be used for summarization.", BART_START_DOCSTRING
 )
+class Our_CrossEntropy(torch.nn.Module):
+
+    def __init__(self):
+        super(Our_CrossEntropy, self).__init__()
+
+    def forward(self, pre, target, ignore_index=-100):
+        total_loss = 0.0
+        batch = 0
+        for i in range(pre.shape[0]):  # batch
+            x = pre[i]
+            y = target[i]
+
+            mask = (y != ignore_index)
+            filter_x = x[mask]
+            filter_y = y[mask]
+
+            if filter_y.size(0) == 0:
+                return torch.tensor(0.0)
+
+            logits = torch.nn.functional.softmax(filter_x, dim=1)
+            # y_onehot = torch.nn.functional.one_hot(filter_y, num_classes=logits.shape[1])
+            token_loss = 0.0
+            for j in range(filter_y.shape[0]):  # 遍历一句话中的每个token,寻找该token的最大概率
+                index = filter_y[j]
+                prob_at_index = logits[:, index]
+                max_prob = torch.max(prob_at_index, dim=0)
+
+                log = torch.log(max_prob.values)
+                loss_at_index = -torch.mean(torch.sum(log))
+                token_loss += loss_at_index
+
+            token_loss = token_loss / filter_y.shape[0]
+            total_loss += token_loss.item()
+            batch += 1
+
+        if batch == 0:
+            return torch.tensor(0.0)
+        average_loss = total_loss / batch
+        return average_loss
+
 class BartForConditionalGeneration(BartPreTrainedModel):
     base_model_prefix = "model"
     _tied_weights_keys = ["encoder.embed_tokens.weight", "decoder.embed_tokens.weight", "lm_head.weight"]
@@ -1600,6 +1640,11 @@ class BartForConditionalGeneration(BartPreTrainedModel):
             labels = labels.to(lm_logits.device)
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
+
+            loss_fmy = Our_CrossEntropy()
+            my_lm_loss = loss_fmy(lm_logits, labels)
+
+            masked_lm_loss = 0.9 * masked_lm_loss + 0.1 * my_lm_loss
 
         if not return_dict:
             output = (lm_logits,) + outputs[1:]
